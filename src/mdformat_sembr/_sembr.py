@@ -53,12 +53,20 @@ DEFAULT_ABBREVIATIONS: frozenset[str] = frozenset(
 # is decided by `_starts_sentence`, not by the regex: the text has been masked
 # by then, so a sentence opening with a link or a code span begins with a
 # placeholder, and a capital letter outside ASCII is a capital too.
-_SENTENCE_BOUNDARY = re.compile(r'(?<=[.!?])(?<!\.\.\.)\s+(?=\S)')
+#
+# Emphasis and strikethrough closers (`*`, `_`, `~`) may sit between the
+# terminator and the whitespace: "**A bold lead-in.** The rest." ends a
+# sentence at the `**`, and there is no punctuation style in which it does
+# not. They are consumed by the match and kept on the preceding line.
+_SENTENCE_BOUNDARY = re.compile(r'(?<=[.!?])(?<!\.\.\.)[*_~]*\s+(?=\S)')
 
-# Extended variant that also consumes an optional closing quote or bracket
-# immediately after the terminator (American-English punctuation style, e.g.
-# `"goodbye."` or `[sic.]`). Only used when ``closing_punct=True``.
-_SENTENCE_BOUNDARY_CLOSING = re.compile(r'(?<=[.!?])(?<!\.\.\.)["\')\]]?\s+(?=\S)')
+# Extended variant that also consumes closing quotes and brackets immediately
+# after the terminator (American-English punctuation style, e.g. `"goodbye."`
+# or `[sic.]`), in any combination with the emphasis closers above. Only used
+# when ``closing_punct=True``.
+_SENTENCE_BOUNDARY_CLOSING = re.compile(
+    r'(?<=[.!?])(?<!\.\.\.)["\')\]*_~\u2019\u201d\u00bb]*\s+(?=\S)'
+)
 
 # Markup that may sit between the whitespace and the first letter of the next
 # sentence: an opening quote, bracket, emphasis or code marker.
@@ -191,10 +199,10 @@ def _split_points(
     """Return sorted cut indices for sentence boundaries in ``masked`` text.
 
     Each index is the position of the whitespace run following a sentence
-    terminator.  When ``closing_punct`` is True the extended regex is used,
-    which also matches an optional closing quote or bracket before the
-    whitespace (American-English punctuation style); the cut is then advanced
-    past that closing character so it stays on the preceding line.
+    terminator and any emphasis closers.  When ``closing_punct`` is True the
+    extended regex is used, which also matches closing quotes and brackets
+    before the whitespace (American-English punctuation style); closing
+    characters of either kind stay on the preceding line.
     ``store`` is the placeholder mapping from :func:`_mask`, consulted when the
     text after the boundary is a masked construct.
     """
@@ -205,16 +213,14 @@ def _split_points(
             continue
         if not _starts_sentence(masked, m.end(), store or {}):
             continue
-        if closing_punct:
-            # Advance past any non-whitespace prefix (the closing char) so the
-            # cut lands on the first whitespace character.
-            prefix = m.group(0)
-            ws_offset = 0
-            while ws_offset < len(prefix) and not prefix[ws_offset].isspace():
-                ws_offset += 1
-            points.append(m.start() + ws_offset)
-        else:
-            points.append(m.start())
+        # Advance past any closing characters the match consumed so the cut
+        # lands on the first whitespace character and they stay on the
+        # preceding line.
+        prefix = m.group(0)
+        ws_offset = 0
+        while ws_offset < len(prefix) and not prefix[ws_offset].isspace():
+            ws_offset += 1
+        points.append(m.start() + ws_offset)
     return points
 
 
