@@ -12,7 +12,7 @@ abbreviation guard are ported from the project's original
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 __all__ = [
     "DEFAULT_MIN_CHARS",
@@ -48,18 +48,21 @@ DEFAULT_ABBREVIATIONS: frozenset[str] = frozenset(
 # ---------------------------------------------------------------------------
 
 # Sentence-terminator (. ! ?) — including "?!"/"!?" runs — followed by
-# whitespace and a likely sentence start. The negative lookbehind avoids
-# breaking inside an ellipsis ("...").
-_SENTENCE_BOUNDARY = re.compile(
-    r'(?<=[.!?])(?<!\.\.\.)\s+(?=["\'(\[`*_]?[A-Z0-9])'
-)
+# whitespace and then something. The negative lookbehind avoids breaking
+# inside an ellipsis ("..."). Whether what follows actually starts a sentence
+# is decided by `_starts_sentence`, not by the regex: the text has been masked
+# by then, so a sentence opening with a link or a code span begins with a
+# placeholder, and a capital letter outside ASCII is a capital too.
+_SENTENCE_BOUNDARY = re.compile(r'(?<=[.!?])(?<!\.\.\.)\s+(?=\S)')
 
 # Extended variant that also consumes an optional closing quote or bracket
 # immediately after the terminator (American-English punctuation style, e.g.
 # `"goodbye."` or `[sic.]`). Only used when ``closing_punct=True``.
-_SENTENCE_BOUNDARY_CLOSING = re.compile(
-    r'(?<=[.!?])(?<!\.\.\.)["\')\]]?\s+(?=["\'(\[`*_]?[A-Z0-9])'
-)
+_SENTENCE_BOUNDARY_CLOSING = re.compile(r'(?<=[.!?])(?<!\.\.\.)["\')\]]?\s+(?=\S)')
+
+# Markup that may sit between the whitespace and the first letter of the next
+# sentence: an opening quote, bracket, emphasis or code marker.
+_OPENERS = "\"'([`*_\u201c\u2018\u00ab"
 
 # Placeholder markers use NUL bytes which never occur in Markdown source text.
 _PLACEHOLDER = "\x00{kind}{index}\x00"
@@ -151,10 +154,39 @@ def _collapse_whitespace(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _starts_sentence(masked: str, i: int, store: Mapping[str, str]) -> bool:
+    """True if ``masked[i:]`` reads as the start of a new sentence.
+
+    That is an uppercase letter or a digit, optionally behind opening markup.
+    A masked construct is judged by what it stands for: a code span routinely
+    opens a sentence in technical prose, a link or image by the first letter
+    of its label, and a footnote reference never does.
+    """
+    n = len(masked)
+    while i < n and masked[i] in _OPENERS:
+        i += 1
+    if i >= n:
+        return False
+    if masked[i] == "\x00":
+        m = _PLACEHOLDER_RE.match(masked, i)
+        if m is None:
+            return False
+        kind, original = m.group(1), store.get(m.group(0), "")
+        if kind == "CODE":
+            return True
+        if kind == "FOOT":
+            return False
+        # LINK / REF: strip the image bang and the opening bracket, then look
+        # at the label the same way as plain text.
+        return _starts_sentence(original.lstrip("!")[1:], 0, {})
+    return masked[i].isupper() or masked[i].isdigit()
+
+
 def _split_points(
     masked: str,
     abbreviations: frozenset[str],
     closing_punct: bool = False,
+    store: Mapping[str, str] | None = None,
 ) -> list[int]:
     """Return sorted cut indices for sentence boundaries in ``masked`` text.
 
@@ -163,11 +195,15 @@ def _split_points(
     which also matches an optional closing quote or bracket before the
     whitespace (American-English punctuation style); the cut is then advanced
     past that closing character so it stays on the preceding line.
+    ``store`` is the placeholder mapping from :func:`_mask`, consulted when the
+    text after the boundary is a masked construct.
     """
     pattern = _SENTENCE_BOUNDARY_CLOSING if closing_punct else _SENTENCE_BOUNDARY
     points: list[int] = []
     for m in pattern.finditer(masked):
         if _is_abbreviation_before(masked, m.start(), abbreviations):
+            continue
+        if not _starts_sentence(masked, m.end(), store or {}):
             continue
         if closing_punct:
             # Advance past any non-whitespace prefix (the closing char) so the
@@ -252,7 +288,7 @@ def insert_breaks(
 
     masked, store = _mask(collapsed)
 
-    cut_points = _split_points(masked, abbrev, closing_punct)
+    cut_points = _split_points(masked, abbrev, closing_punct, store)
     if break_clauses:
         cut_points += _clause_split_points(masked, clause_chars)
 
