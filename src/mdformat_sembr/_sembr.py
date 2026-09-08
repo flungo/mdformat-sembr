@@ -61,6 +61,14 @@ _SENTENCE_BOUNDARY_CLOSING = re.compile(
     r'(?<=[.!?])(?<!\.\.\.)["\')\]]?\s+(?=["\'(\[`*_]?[A-Z0-9])'
 )
 
+# A hard line break as mdformat renders it: a backslash, then the newline.
+# (The two-trailing-spaces form has already been normalised to this by the
+# time a paragraph postprocessor runs.) A backslash that is itself escaped
+# (``\\`` at end of line) is a literal backslash and a soft break, not a hard
+# break, hence the lookbehind.
+_HARD_BREAK_RE = re.compile(r"(?<!\\)\\\n")
+_HARD_BREAK = "\\\n"
+
 # Placeholder markers use NUL bytes which never occur in Markdown source text.
 _PLACEHOLDER = "\x00{kind}{index}\x00"
 _PLACEHOLDER_RE = re.compile(r"\x00([A-Z]+)(\d+)\x00")
@@ -239,12 +247,41 @@ def insert_breaks(
 
     Only bare ``\\n`` soft breaks are emitted — never hard breaks. Rendered HTML
     output is therefore unchanged. The transform is deterministic and idempotent.
+
+    A hard break already in the paragraph (``\\`` before a newline) renders to
+    ``<br>``, so it is kept exactly where it is: the text on either side of it
+    is broken independently and the hard break itself is never collapsed.
     """
     abbrev = (
         DEFAULT_ABBREVIATIONS
         if abbreviations is None
         else frozenset(abbreviations)
     )
+
+    return _HARD_BREAK.join(
+        _insert_breaks_between_hard_breaks(
+            segment,
+            min_chars=min_chars,
+            abbreviations=abbrev,
+            break_clauses=break_clauses,
+            clause_chars=clause_chars,
+            closing_punct=closing_punct,
+        )
+        for segment in _HARD_BREAK_RE.split(text)
+    )
+
+
+def _insert_breaks_between_hard_breaks(
+    text: str,
+    *,
+    min_chars: int,
+    abbreviations: frozenset[str],
+    break_clauses: bool,
+    clause_chars: str,
+    closing_punct: bool,
+) -> str:
+    """:func:`insert_breaks` for one run of text containing no hard break."""
+    abbrev = abbreviations
 
     collapsed = _collapse_whitespace(text)
     if not collapsed:
