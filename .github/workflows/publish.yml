@@ -11,6 +11,12 @@ jobs:
       id-token: write        # required for Trusted Publishing + attestations
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The version is derived from the tag by the build backend, and
+          # Dunamai refuses to guess in a shallow repository. The default
+          # depth-1 checkout therefore fails the build outright — a full
+          # clone is what lets it read the tag.
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -18,5 +24,21 @@ jobs:
         run: |
           python -m pip install --upgrade build
           python -m build
+      - name: Verify the built version matches the tag
+        run: |
+          python - "$GITHUB_REF_NAME" <<'PY'
+          import pathlib
+          import sys
+
+          tag = sys.argv[1]
+          expected = tag[1:] if tag.startswith("v") else tag
+          sdists = sorted(pathlib.Path("dist").glob("*.tar.gz"))
+          if len(sdists) != 1:
+              sys.exit(f"expected exactly one sdist in dist/, found {sdists}")
+          built = sdists[0].name.removeprefix("mdformat_sembr-").removesuffix(".tar.gz")
+          if built != expected:
+              sys.exit(f"tag {tag} expects version {expected}, but the build produced {built}")
+          print(f"built version {built} matches tag {tag}")
+          PY
       - name: Publish
         uses: pypa/gh-action-pypi-publish@release/v1

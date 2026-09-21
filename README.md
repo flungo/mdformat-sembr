@@ -90,6 +90,26 @@ min_chars = 20
 break_clauses = true
 ```
 
+## Releasing
+
+The version is not written down anywhere. It is derived from the git tag at
+build time by [`uv-dynamic-versioning`](https://github.com/ninoseki/uv-dynamic-versioning),
+and `mdformat_sembr.__version__` reads it back from the installed
+distribution's metadata — so there is no second copy to drift.
+
+To cut a release, tag the commit and push the tag:
+
+```bash
+git tag v0.3.0
+git push origin v0.3.0
+```
+
+Between tags the version is a PEP 440 development version such as
+`0.2.0.post3.dev0+a1b2c3d`. Building outside a git checkout is an error rather
+than a `0.0.0` fallback, and the publish workflow both checks out full history
+(a shallow clone cannot resolve the tag) and refuses to publish an artifact
+whose version does not match the tag.
+
 ## License
 
 MIT
