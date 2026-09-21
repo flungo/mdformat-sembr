@@ -4,10 +4,15 @@ This module *is* the plugin interface object referenced by the entry point
 ``mdformat_sembr:_plugin``. It exposes the members required by
 ``mdformat.plugins.ParserExtensionInterface`` at module level.
 
-We do not change the parser or override any renderer; all work happens in a
-postprocessor registered on the ``paragraph`` node type. At that point inline
-formatting is already resolved into the rendered string, so we operate on final
-text and protect a few inline constructs by regex.
+We override no renderer; all work happens in postprocessors, chiefly the one on
+the ``paragraph`` node type. At that point inline formatting is already resolved
+into the rendered string, so we operate on final text and protect a few inline
+constructs by regex.
+
+The parser is touched only to preserve information it would otherwise discard:
+two inline rules are wrapped so that line breaks remember how far the line they
+open was indented. That is metadata, invisible to rendering, and it is only
+acted on when ``preserve_indented_breaks`` is set.
 """
 
 from __future__ import annotations
@@ -16,15 +21,22 @@ import argparse
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
+from markdown_it.rules_inline import escape as _default_escape_rule
+from markdown_it.rules_inline import newline as _default_newline_rule
+
 from mdformat_sembr._sembr import (
     DEFAULT_ABBREVIATIONS,
     DEFAULT_CLAUSE_CHARS,
+    DEFAULT_CONTINUATION_INDENT,
     DEFAULT_MIN_CHARS,
+    continuation_mark,
     insert_breaks,
+    strip_continuation_marks,
 )
 
 if TYPE_CHECKING:
     from markdown_it import MarkdownIt
+    from markdown_it.rules_inline import StateInline
     from mdformat.renderer import RenderContext, RenderTreeNode
 
 #: SemBr soft breaks never alter the rendered output, so the AST is unchanged.
@@ -32,10 +44,61 @@ if TYPE_CHECKING:
 CHANGES_AST = False
 
 
+#: Inline token types whose newline opens a new source line.
+_BREAK_TOKENS = ("softbreak", "hardbreak")
+
+
+def _indent_after_break(source: str, start: int, end: int) -> int:
+    """Return the indentation of the line opened by a newline in ``source``.
+
+    ``start``/``end`` bound the span an inline rule just consumed. If it did not
+    consume a newline the rule was not a line break and the answer is zero.
+    """
+    newline = source.find("\n", start, end)
+    if newline == -1:
+        return 0
+    cursor = newline + 1
+    while cursor < len(source) and source[cursor] in " \t":
+        cursor += 1
+    return cursor - (newline + 1)
+
+
+def _track_indent(rule: Any) -> Any:
+    """Wrap an inline ``rule`` so breaks it emits carry their line's indent.
+
+    markdown-it discards that indentation while tokenizing — it eats the spaces
+    after a newline, and mdformat's ``text`` renderer collapses runs of spaces —
+    so by the time a postprocessor sees a paragraph, the author's continuation
+    marking is gone. Recording it here, as token metadata, is the last point at
+    which it is still available. Metadata is invisible to the HTML renderer, so
+    this does not disturb ``is_md_equal`` validation.
+    """
+
+    def tracked(state: "StateInline", silent: bool) -> bool:
+        start = state.pos
+        first_new_token = len(state.tokens)
+        handled = rule(state, silent)
+        if not handled or silent:
+            return handled
+
+        indent = _indent_after_break(state.src, start, state.pos)
+        if indent:
+            for token in state.tokens[first_new_token:]:
+                if token.type in _BREAK_TOKENS:
+                    token.meta = {**token.meta, "sembr_indent": indent}
+        return handled
+
+    return tracked
+
+
 def update_mdit(mdit: "MarkdownIt") -> None:
-    """No parser change is needed for SemBr."""
-    # Intentionally a no-op.
-    pass
+    """Tag line breaks with the indentation of the line they open.
+
+    Both rules matter: ``newline`` produces soft breaks and the two-space hard
+    break, while a backslash hard break comes out of ``escape``.
+    """
+    mdit.inline.ruler.at("newline", _track_indent(_default_newline_rule))
+    mdit.inline.ruler.at("escape", _track_indent(_default_escape_rule))
 
 
 def _plugin_options(context: "RenderContext") -> Mapping[str, Any]:
@@ -43,6 +106,58 @@ def _plugin_options(context: "RenderContext") -> Mapping[str, Any]:
     mdformat_opts = context.options.get("mdformat", {})
     plugin_opts = mdformat_opts.get("plugin", {})
     return plugin_opts.get("sembr", {}) or {}
+
+
+def _in_paragraph(node: "RenderTreeNode") -> bool:
+    """Return True if ``node`` renders inside a paragraph rather than a heading."""
+    parent = node.parent
+    while parent is not None:
+        if parent.type in ("paragraph", "heading"):
+            return parent.type == "paragraph"
+        parent = parent.parent
+    return False
+
+
+def _postprocess_break(
+    text: str,
+    node: "RenderTreeNode",
+    context: "RenderContext",
+) -> str:
+    """Mark a rendered line break with the indentation level it was written at.
+
+    The marker is consumed again by :func:`_postprocess_paragraph`, so it never
+    reaches the output. It also never reaches ``is_md_equal``, which renders
+    through markdown-it's HTML renderer rather than mdformat's.
+
+    Every break is marked, not only the indented ones: that is what lets the
+    paragraph postprocessor tell a break the author wrote from a newline
+    mdformat's own word wrapping introduced.
+
+    The marker ends the line the break closes rather than starting the line it
+    opens — see :data:`CONTINUATION_MARK` for why that distinction matters.
+    """
+    opts = _plugin_options(context)
+    if not bool(opts.get("preserve_indented_breaks", False)):
+        return text
+    if not _in_paragraph(node):
+        return text
+
+    indent = node.meta.get("sembr_indent", 0)
+    unit = int(opts.get("continuation_indent", DEFAULT_CONTINUATION_INDENT))
+    # Any indentation at all pins the break, so round down to a whole number of
+    # levels rather than up: an odd width snaps to the nearest level below, and
+    # a single tab or space still counts as one.
+    level = max(1, indent // unit) if indent and unit > 0 else 0
+    mark = continuation_mark(level)
+    if text.endswith("\n"):
+        # Soft break, or a hard break whose backslash must stay on its line.
+        # The marker goes before the newline, never after: mdformat's
+        # line-start escaping runs between here and the paragraph
+        # postprocessor, and every check it makes is anchored at column zero.
+        return text[:-1] + mark + "\n"
+    # Under ``--wrap N`` mdformat renders a soft break as a wrap marker instead
+    # of a newline. A pinned break outranks word wrapping, so restore it.
+    return mark + "\n"
 
 
 def _postprocess_paragraph(
@@ -56,9 +171,10 @@ def _postprocess_paragraph(
     # with '|') and return the text unchanged so the table structure is
     # preserved. With a table plugin the node type is 'table', not 'paragraph',
     # so this guard is never reached for properly-parsed tables.
-    lines = text.splitlines()
+    unmarked = strip_continuation_marks(text)
+    lines = unmarked.splitlines()
     if len(lines) > 1 and any(line.lstrip().startswith("|") for line in lines):
-        return text
+        return unmarked
 
     opts = _plugin_options(context)
 
@@ -67,6 +183,9 @@ def _postprocess_paragraph(
     break_clauses = bool(opts.get("break_clauses", False))
     clause_chars = opts.get("clause_chars", DEFAULT_CLAUSE_CHARS)
     closing_punct = bool(opts.get("closing_punct", False))
+    continuation_indent = opts.get(
+        "continuation_indent", DEFAULT_CONTINUATION_INDENT
+    )
 
     return insert_breaks(
         text,
@@ -75,6 +194,7 @@ def _postprocess_paragraph(
         break_clauses=break_clauses,
         clause_chars=clause_chars,
         closing_punct=closing_punct,
+        continuation_indent=int(continuation_indent),
     )
 
 
@@ -135,6 +255,29 @@ def add_cli_argument_group(group: argparse._ArgumentGroup) -> None:
             "American-English punctuation style (off by default)"
         ),
     )
+    group.add_argument(
+        "--sembr-preserve-indented-breaks",
+        dest="preserve_indented_breaks",
+        action="store_true",
+        default=None,
+        help=(
+            "keep a soft break the author pinned by indenting the line after "
+            "it, instead of reflowing it away (SemBr rules 6 and 8; off by "
+            "default)"
+        ),
+    )
+    group.add_argument(
+        "--sembr-continuation-indent",
+        dest="continuation_indent",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "spaces per level of continuation indent, used to read and to "
+            "re-emit pinned breaks "
+            f"(default: {DEFAULT_CONTINUATION_INDENT})"
+        ),
+    )
 
 
 #: A mapping from ``RenderTreeNode.type`` to a ``Render`` function. Empty: we do
@@ -142,7 +285,14 @@ def add_cli_argument_group(group: argparse._ArgumentGroup) -> None:
 RENDERERS: Mapping[str, Any] = {}
 
 #: A mapping from ``RenderTreeNode.type`` to a collaborative ``Postprocess``.
-POSTPROCESSORS: Mapping[str, Any] = {"paragraph": _postprocess_paragraph}
+#: The break types are handled here rather than in ``RENDERERS`` deliberately:
+#: postprocessors chain, so this cannot conflict with another plugin, and it
+#: leaves mdformat's own break rendering in place.
+POSTPROCESSORS: Mapping[str, Any] = {
+    "paragraph": _postprocess_paragraph,
+    "softbreak": _postprocess_break,
+    "hardbreak": _postprocess_break,
+}
 
 
 __all__ = [
@@ -153,5 +303,6 @@ __all__ = [
     "add_cli_argument_group",
     "DEFAULT_ABBREVIATIONS",
     "DEFAULT_CLAUSE_CHARS",
+    "DEFAULT_CONTINUATION_INDENT",
     "DEFAULT_MIN_CHARS",
 ]
