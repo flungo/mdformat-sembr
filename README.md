@@ -197,6 +197,26 @@ idempotent; they just reflow as they did before:
 | Newline inside a code span | Not a soft break — the newline belongs to the code span. |
 | Newline inside inline HTML | Not a soft break, and mdformat must keep it to stay inline. |
 
+## Releasing
+
+The version is not written down anywhere. It is derived from the git tag at
+build time by [`uv-dynamic-versioning`](https://github.com/ninoseki/uv-dynamic-versioning),
+and `mdformat_sembr.__version__` reads it back from the installed
+distribution's metadata — so there is no second copy to drift.
+
+To cut a release, tag the commit and push the tag:
+
+```bash
+git tag v0.3.0
+git push origin v0.3.0
+```
+
+Between tags the version is a PEP 440 development version such as
+`0.2.0.post2.dev0+8174d69`. Building outside a git checkout is an error rather
+than a `0.0.0` fallback, and the publish workflow both checks out full history
+(a shallow clone cannot resolve the tag) and refuses to publish an artifact
+whose version does not match the tag.
+
 ## License
 
 MIT

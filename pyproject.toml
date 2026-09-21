@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.28", "uv-dynamic-versioning>=0.14,<0.15"]
 build-backend = "hatchling.build"
 
 [project]
 name = "mdformat-sembr"
-version = "0.2.0"
+dynamic = ["version"]
 description = "mdformat plugin that inserts Semantic Line Breaks (sembr.org) as CommonMark soft breaks"
 readme = "README.md"
 license = "MIT"
@@ -33,6 +33,15 @@ Homepage = "https://codeberg.org/bugrasan/mdformat-sembr"
 
 [project.entry-points."mdformat.parser_extension"]
 sembr = "mdformat_sembr:_plugin"
+
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
+
+[tool.uv-dynamic-versioning]
+# Without a style the output follows PEP 440, which is what PyPI accepts.
+# `strict` makes a tagless tree an error rather than a silent 0.0.0 — a
+# shallow CI checkout would otherwise publish 0.0.0 over a real release.
+strict = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mdformat_sembr"]
