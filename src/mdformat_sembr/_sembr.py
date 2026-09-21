@@ -65,6 +65,10 @@ _SENTENCE_BOUNDARY_CLOSING = re.compile(
 _PLACEHOLDER = "\x00{kind}{index}\x00"
 _PLACEHOLDER_RE = re.compile(r"\x00([A-Z]+)(\d+)\x00")
 
+# A CommonMark backslash hard break: an odd number of trailing backslashes, so
+# that an escaped backslash ("\\\\") is not mistaken for one.
+_HARD_BREAK_RE = re.compile(r"\\+$")
+
 # Protected inline constructs. Order matters: images/links before bare code so
 # a link label containing backticks is masked as one unit.
 _PROTECTED_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
@@ -141,6 +145,32 @@ def _is_abbreviation_before(text: str, idx: int, abbreviations: frozenset[str]) 
 # ---------------------------------------------------------------------------
 # Core break logic
 # ---------------------------------------------------------------------------
+
+def _ends_with_hard_break(line: str) -> bool:
+    """Return True if ``line`` ends in a backslash hard break."""
+    match = _HARD_BREAK_RE.search(line)
+    return bool(match) and len(match.group(0)) % 2 == 1
+
+
+def _group_lines(text: str) -> list[str]:
+    """Split paragraph text into runs of lines that may be reflowed together.
+
+    A hard break always ends a run. Its newline *is* the rendered output, so
+    collapsing it into a space changes the HTML — which fails mdformat's
+    ``is_md_equal`` check and makes the CLI refuse to format the file at all.
+    """
+    groups: list[list[str]] = []
+    previous = ""
+
+    for line in text.split("\n"):
+        if not groups or _ends_with_hard_break(previous):
+            groups.append([line])
+        else:
+            groups[-1].append(line)
+        previous = line
+
+    return [" ".join(parts) for parts in groups]
+
 
 def _collapse_whitespace(text: str) -> str:
     """Collapse all runs of whitespace (including newlines) to single spaces.
@@ -221,6 +251,30 @@ def _apply_breaks(masked: str, cut_points: Iterable[int], min_chars: int) -> str
     return "".join(out)
 
 
+def _break_group(
+    text: str,
+    *,
+    min_chars: int,
+    abbrev: frozenset[str],
+    break_clauses: bool,
+    clause_chars: str,
+    closing_punct: bool,
+) -> str:
+    """Collapse one reflowable group and break it at SemBr boundaries."""
+    collapsed = _collapse_whitespace(text)
+    if not collapsed:
+        return collapsed
+
+    masked, store = _mask(collapsed)
+
+    cut_points = _split_points(masked, abbrev, closing_punct)
+    if break_clauses:
+        cut_points += _clause_split_points(masked, clause_chars)
+
+    broken = _apply_breaks(masked, cut_points, min_chars)
+    return _unmask(broken, store)
+
+
 def insert_breaks(
     text: str,
     *,
@@ -237,6 +291,9 @@ def insert_breaks(
     (Iteration 2). Protected inline regions (code, links, images, footnote refs)
     and abbreviations are never split.
 
+    Hard breaks split the text into independently reflowed groups, so that the
+    newline a hard break stands for is never collapsed away.
+
     Only bare ``\\n`` soft breaks are emitted — never hard breaks. Rendered HTML
     output is therefore unchanged. The transform is deterministic and idempotent.
     """
@@ -246,15 +303,17 @@ def insert_breaks(
         else frozenset(abbreviations)
     )
 
-    collapsed = _collapse_whitespace(text)
-    if not collapsed:
-        return collapsed
+    rendered: list[str] = []
+    for content in _group_lines(text):
+        body = _break_group(
+            content,
+            min_chars=min_chars,
+            abbrev=abbrev,
+            break_clauses=break_clauses,
+            clause_chars=clause_chars,
+            closing_punct=closing_punct,
+        )
+        if body:
+            rendered.append(body)
 
-    masked, store = _mask(collapsed)
-
-    cut_points = _split_points(masked, abbrev, closing_punct)
-    if break_clauses:
-        cut_points += _clause_split_points(masked, clause_chars)
-
-    broken = _apply_breaks(masked, cut_points, min_chars)
-    return _unmask(broken, store)
+    return "\n".join(rendered)
