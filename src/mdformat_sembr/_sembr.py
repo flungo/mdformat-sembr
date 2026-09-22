@@ -63,10 +63,14 @@ _SENTENCE_BOUNDARY_CLOSING = re.compile(
 
 # A hard line break as mdformat renders it: a backslash, then the newline.
 # (The two-trailing-spaces form has already been normalised to this by the
-# time a paragraph postprocessor runs.) A backslash that is itself escaped
-# (``\\`` at end of line) is a literal backslash and a soft break, not a hard
-# break, hence the lookbehind.
-_HARD_BREAK_RE = re.compile(r"(?<!\\)\\\n")
+# time a paragraph postprocessor runs.)
+#
+# Backslashes before a newline pair up into literal backslashes, so the run
+# has to be counted rather than merely inspected: an odd run ends in a hard
+# break, an even one is a literal backslash followed by a soft break. A
+# lookbehind cannot express that, because in ``\\\\\\`` the backslash before
+# the last one is itself half of an escaped pair.
+_BACKSLASH_RUN_RE = re.compile(r"\\+\n")
 _HARD_BREAK = "\\\n"
 
 # Placeholder markers use NUL bytes which never occur in Markdown source text.
@@ -149,6 +153,20 @@ def _is_abbreviation_before(text: str, idx: int, abbreviations: frozenset[str]) 
 # ---------------------------------------------------------------------------
 # Core break logic
 # ---------------------------------------------------------------------------
+
+def _split_on_hard_breaks(text: str) -> list[str]:
+    """Split ``text`` into runs separated by hard breaks."""
+    segments: list[str] = []
+    start = 0
+    for match in _BACKSLASH_RUN_RE.finditer(text):
+        if (len(match.group(0)) - 1) % 2 == 0:
+            continue  # even run: literal backslashes and a soft break
+        # End the segment before the backslash that forms the hard break.
+        segments.append(text[start : match.end() - 2])
+        start = match.end()
+    segments.append(text[start:])
+    return segments
+
 
 def _collapse_whitespace(text: str) -> str:
     """Collapse all runs of whitespace (including newlines) to single spaces.
@@ -267,7 +285,7 @@ def insert_breaks(
             clause_chars=clause_chars,
             closing_punct=closing_punct,
         )
-        for segment in _HARD_BREAK_RE.split(text)
+        for segment in _split_on_hard_breaks(text)
     )
 
 
