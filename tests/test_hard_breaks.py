@@ -129,3 +129,57 @@ def test_any_run_length_is_ast_safe(run: int) -> None:
 def test_any_run_length_is_idempotent(run: int) -> None:
     once = mdformat.text(_paragraph_with_run(run), extensions={"sembr"})
     assert mdformat.text(once, extensions={"sembr"}) == once
+
+
+# ---------------------------------------------------------------------------
+# Interaction with `preserve_indented_breaks`
+#
+# The marker that option writes sits immediately before a break, ahead of a
+# hard break's own backslash, so it must not disturb the split above — and the
+# indentation of the line a hard break opens has to survive being stranded on
+# the far side of that split.
+# ---------------------------------------------------------------------------
+
+PRESERVE = {"plugin": {"sembr": {"preserve_indented_breaks": True}}}
+
+option_states = pytest.mark.parametrize(
+    "options",
+    [
+        pytest.param({}, id="default"),
+        pytest.param(PRESERVE, id="preserve-indented-breaks"),
+    ],
+)
+
+
+@BACKSLASH_RUNS
+@option_states
+def test_run_length_is_unaffected_by_preserving_breaks(
+    run: int, options: dict
+) -> None:
+    src = _paragraph_with_run(run)
+    out = mdformat.text(src, extensions={"sembr"}, options=options)
+    assert ("\\\n" in out) is (run % 2 == 1)
+    assert is_md_equal(src, out, extensions={"sembr"}, options=options)
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        pytest.param(
+            "Intro sentence here.\n  a pinned line.\\\n  after the hard break.\n",
+            id="pinned-either-side",
+        ),
+        pytest.param(
+            "A first sentence here.\\\n  a pinned continuation.\n",
+            id="pinned-after",
+        ),
+        pytest.param(
+            "Intro sentence here.\n  a pinned line.\\\n  after the hard break.\n",
+            id="continuation-after",
+        ),
+    ],
+)
+def test_indentation_survives_across_a_hard_break(src: str) -> None:
+    out = mdformat.text(src, extensions={"sembr"}, options=PRESERVE)
+    assert out == src
+    assert is_md_equal(src, out, extensions={"sembr"}, options=PRESERVE)
