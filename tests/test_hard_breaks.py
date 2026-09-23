@@ -188,3 +188,117 @@ def test_sentences_still_break_next_to_kept_whitespace() -> None:
     assert insert_breaks(src, min_chars=1) == (
         "First one.\nSecond one. \\\nThird one.\nFourth one."
     )
+
+
+# ---------------------------------------------------------------------------
+# Interaction with the continuation options
+#
+# Preserving breaks marks each one, and a hard break's marker ends up just
+# ahead of its own backslash, so it must not disturb the split above — and the
+# indentation of the line a hard break opens has to survive being stranded on
+# the far side of that split.
+# ---------------------------------------------------------------------------
+
+PRESERVE = {"plugin": {"sembr": {"preserve_indented_breaks": True}}}
+
+option_states = pytest.mark.parametrize(
+    "options",
+    [
+        pytest.param({}, id="default"),
+        pytest.param(PRESERVE, id="preserve-indented-breaks"),
+    ],
+)
+
+
+@BACKSLASH_RUNS
+@option_states
+def test_run_length_is_unaffected_by_preserving_breaks(
+    run: int, options: dict
+) -> None:
+    src = _paragraph_with_run(run)
+    out = mdformat.text(src, extensions={"sembr"}, options=options)
+    assert ("\\\n" in out) is (run % 2 == 1)
+    assert is_md_equal(src, out, extensions={"sembr"}, options=options)
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        pytest.param(
+            "Intro sentence here.\n  a kept line.\\\n  after the hard break.\n",
+            id="kept-either-side",
+        ),
+        pytest.param(
+            "A first sentence here.\\\n  a kept continuation.\n",
+            id="kept-after",
+        ),
+        pytest.param(
+            "Intro sentence here.\n  a kept line.\\\nA new sentence after it.\n",
+            id="de-dent-after",
+        ),
+    ],
+)
+def test_indentation_survives_across_a_hard_break(src: str) -> None:
+    out = mdformat.text(src, extensions={"sembr"}, options=PRESERVE)
+    assert out == src
+    assert is_md_equal(src, out, extensions={"sembr"}, options=PRESERVE)
+
+
+INDENTING = pytest.mark.parametrize(
+    "options",
+    [
+        pytest.param({"plugin": {"sembr": {"continuation_indent": 2}}}, id="indent"),
+        pytest.param(PRESERVE, id="preserve-indented-breaks"),
+    ],
+)
+
+
+@WHITESPACE_AT_HARD_BREAKS
+@INDENTING
+def test_whitespace_at_a_hard_break_survives_indenting(src: str, options: dict) -> None:
+    """Either half rewrites the runs on both sides of a hard break, and with
+    preservation on, the break's marker sits right beside that whitespace."""
+    once = mdformat.text(src, extensions={"sembr"}, options=options)
+    assert is_md_equal(src, once, extensions={"sembr"}, options=options)
+    assert mdformat.text(once, extensions={"sembr"}, options=options) == once
+
+
+@INDENTING
+def test_an_empty_run_between_hard_breaks_gains_no_indent(options: dict) -> None:
+    """Nothing sits between two consecutive hard breaks, so there is nothing to
+    indent — even though the line after them is a continuation and is."""
+    src = "A first line of prose here,\\\n\\\nand a continuation after two.\n"
+    out = mdformat.text(src, extensions={"sembr"}, options=options)
+    assert out.split("\n")[1] == "\\"
+    assert out.split("\n")[2].startswith("  and")
+    assert is_md_equal(src, out, extensions={"sembr"}, options=options)
+    assert mdformat.text(out, extensions={"sembr"}, options=options) == out
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        pytest.param("Hi. Yo.\\\nNext sentence here.\n", id="short-before"),
+        pytest.param("Roses bloom.\\\nOk. Fine then.\n", id="short-after"),
+        pytest.param("Roses bloom.\\\nSugar is sweet.\n", id="short-either-side"),
+    ],
+)
+@INDENTING
+def test_a_sentence_after_a_hard_break_stays_at_the_margin(
+    src: str, options: dict
+) -> None:
+    """Whether a sentence starts at the hard break is the only question. The
+    short sentences beside it break when min_chars is waived to ask it, and
+    must not count against it."""
+    assert mdformat.text(src, extensions={"sembr"}, options=options) == src
+
+
+@INDENTING
+def test_a_line_after_a_hard_break_is_indented_when_its_sentence_starts_later(
+    options: dict,
+) -> None:
+    """Only the join is asked about, and no sentence starts there, however
+    early one starts after it."""
+    src = "Something continues here and goes on\\\nShort. Words here are many.\n"
+    out = mdformat.text(src, extensions={"sembr"}, options=options)
+    assert out == src.replace("\\\n", "\\\n  ")

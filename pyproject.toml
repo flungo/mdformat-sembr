@@ -22,7 +22,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Text Processing :: Markup :: Markdown",
 ]
-dependencies = ["mdformat>=1.0"]
+dependencies = ["mdformat>=1.0", "markdown-it-py"]
 
 [project.optional-dependencies]
 test = ["pytest>=7"]
