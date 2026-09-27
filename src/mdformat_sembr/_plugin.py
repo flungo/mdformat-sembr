@@ -63,6 +63,8 @@ def _postprocess_paragraph(
     opts = _plugin_options(context)
 
     min_chars = opts.get("min_chars", DEFAULT_MIN_CHARS)
+    sentence_min_chars = opts.get("sentence_min_chars", None)
+    clause_min_chars = opts.get("clause_min_chars", None)
     abbreviations = opts.get("abbreviations", None)
     break_clauses = bool(opts.get("break_clauses", False))
     clause_chars = opts.get("clause_chars", DEFAULT_CLAUSE_CHARS)
@@ -71,6 +73,10 @@ def _postprocess_paragraph(
     return insert_breaks(
         text,
         min_chars=int(min_chars),
+        sentence_min_chars=(
+            None if sentence_min_chars is None else int(sentence_min_chars)
+        ),
+        clause_min_chars=None if clause_min_chars is None else int(clause_min_chars),
         abbreviations=abbreviations,
         break_clauses=break_clauses,
         clause_chars=clause_chars,
@@ -93,7 +99,30 @@ def add_cli_argument_group(group: argparse._ArgumentGroup) -> None:
         metavar="N",
         help=(
             "minimum length of the segment before a break is allowed "
-            f"(default: {DEFAULT_MIN_CHARS})"
+            f"(default: {DEFAULT_MIN_CHARS}); the fallback for "
+            "--sembr-sentence-min-chars and --sembr-clause-min-chars"
+        ),
+    )
+    group.add_argument(
+        "--sembr-sentence-min-chars",
+        dest="sentence_min_chars",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "minimum length of the segment before a sentence break is allowed "
+            "(default: --sembr-min-chars)"
+        ),
+    )
+    group.add_argument(
+        "--sembr-clause-min-chars",
+        dest="clause_min_chars",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "minimum length of the segment before a clause break is allowed "
+            "(default: --sembr-min-chars)"
         ),
     )
     group.add_argument(
