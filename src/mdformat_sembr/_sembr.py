@@ -192,22 +192,26 @@ def _clause_split_points(masked: str, clause_chars: str) -> list[int]:
     return [m.start() for m in pattern.finditer(masked)]
 
 
-def _apply_breaks(masked: str, cut_points: Iterable[int], min_chars: int) -> str:
-    """Insert newlines at ``cut_points`` subject to the ``min_chars`` threshold.
+def _apply_breaks(masked: str, cut_points: Iterable[tuple[int, int]]) -> str:
+    """Insert newlines at ``cut_points`` subject to each point's threshold.
 
-    The threshold is measured against the current line segment: a break is only
-    inserted if the text since the previous break is at least ``min_chars`` long.
+    ``cut_points`` holds ``(index, min_chars)`` pairs. The threshold is measured
+    against the current line segment: a break is only inserted if the text since
+    the previous break (of any kind) is at least that point's ``min_chars`` long.
+    When the same index appears more than once, the lowest threshold applies.
     """
-    unique_points = sorted(set(cut_points))
-    if not unique_points:
+    thresholds: dict[int, int] = {}
+    for point, threshold in cut_points:
+        thresholds[point] = min(threshold, thresholds.get(point, threshold))
+    if not thresholds:
         return masked
 
     out: list[str] = []
     last = 0
     line_start = 0
-    for point in unique_points:
+    for point in sorted(thresholds):
         segment_len = len(masked[line_start:point].strip())
-        if segment_len < min_chars:
+        if segment_len < thresholds[point]:
             continue
         out.append(masked[last:point].rstrip())
         out.append("\n")
@@ -225,6 +229,8 @@ def insert_breaks(
     text: str,
     *,
     min_chars: int = DEFAULT_MIN_CHARS,
+    sentence_min_chars: int | None = None,
+    clause_min_chars: int | None = None,
     abbreviations: Iterable[str] | None = None,
     break_clauses: bool = False,
     clause_chars: str = DEFAULT_CLAUSE_CHARS,
@@ -236,6 +242,10 @@ def insert_breaks(
     ``break_clauses`` is true, clause punctuation in ``clause_chars`` also breaks
     (Iteration 2). Protected inline regions (code, links, images, footnote refs)
     and abbreviations are never split.
+
+    ``sentence_min_chars`` and ``clause_min_chars`` set the segment-length
+    threshold for each kind of break; either falls back to ``min_chars`` when
+    ``None``.
 
     Only bare ``\\n`` soft breaks are emitted — never hard breaks. Rendered HTML
     output is therefore unchanged. The transform is deterministic and idempotent.
@@ -252,9 +262,20 @@ def insert_breaks(
 
     masked, store = _mask(collapsed)
 
-    cut_points = _split_points(masked, abbrev, closing_punct)
-    if break_clauses:
-        cut_points += _clause_split_points(masked, clause_chars)
+    if sentence_min_chars is None:
+        sentence_min_chars = min_chars
+    if clause_min_chars is None:
+        clause_min_chars = min_chars
 
-    broken = _apply_breaks(masked, cut_points, min_chars)
+    cut_points = [
+        (point, sentence_min_chars)
+        for point in _split_points(masked, abbrev, closing_punct)
+    ]
+    if break_clauses:
+        cut_points += [
+            (point, clause_min_chars)
+            for point in _clause_split_points(masked, clause_chars)
+        ]
+
+    broken = _apply_breaks(masked, cut_points)
     return _unmask(broken, store)

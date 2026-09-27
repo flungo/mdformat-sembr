@@ -72,15 +72,17 @@ wrong — it is never worked around with `--no-validate` or hard breaks.
 Configure via `[plugin.sembr]` in `.mdformat.toml`, or via CLI flags. CLI values merge
 over TOML.
 
-| Option          | Type        | Default   | Meaning                                                        |
-| --------------- | ----------- | --------- | -------------------------------------------------------------- |
-| `min_chars`     | int         | `15`      | Minimum length of the segment before a break is allowed.       |
-| `abbreviations` | list[str]   | see below | Tokens after which no sentence break is inserted.              |
-| `break_clauses` | bool        | `false`   | Enable clause-level breaks (SemBr "SHOULD"). Off by default.   |
-| `clause_chars`  | str         | `",;:—"`  | Clause punctuation set (only used when `break_clauses` true).  |
+| Option               | Type        | Default     | Meaning                                                        |
+| -------------------- | ----------- | ----------- | -------------------------------------------------------------- |
+| `min_chars`          | int         | `15`        | Minimum length of the segment before a break is allowed.       |
+| `sentence_min_chars` | int         | `min_chars` | Overrides `min_chars` for sentence breaks.                     |
+| `clause_min_chars`   | int         | `min_chars` | Overrides `min_chars` for clause breaks.                       |
+| `abbreviations`      | list[str]   | see below   | Tokens after which no sentence break is inserted.              |
+| `break_clauses`      | bool        | `false`     | Enable clause-level breaks (SemBr "SHOULD"). Off by default.   |
+| `clause_chars`       | str         | `",;:—"`    | Clause punctuation set (only used when `break_clauses` true).  |
 
-CLI flags: `--sembr-min-chars`, `--sembr-abbreviations`, `--sembr-break-clauses`,
-`--sembr-clause-chars`.
+CLI flags: `--sembr-min-chars`, `--sembr-sentence-min-chars`, `--sembr-clause-min-chars`,
+`--sembr-abbreviations`, `--sembr-break-clauses`, `--sembr-clause-chars`.
 
 `.mdformat.toml` example:
 
@@ -88,6 +90,15 @@ CLI flags: `--sembr-min-chars`, `--sembr-abbreviations`, `--sembr-break-clauses`
 [plugin.sembr]
 min_chars = 20
 break_clauses = true
+```
+
+To break after every sentence while keeping short clauses (such as one-word lists)
+together, lower only the sentence threshold:
+
+```toml
+[plugin.sembr]
+break_clauses = true
+sentence_min_chars = 1
 ```
 
 ## License
