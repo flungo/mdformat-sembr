@@ -1,7 +1,7 @@
 # mdformat-sembr
 
-> **Canonical home:** [codeberg.org/adel/mdformat-sembr](https://codeberg.org/adel/mdformat-sembr) — issues and contributions tracked there.
-> The [GitHub mirror](https://github.com/adel/mdformat-sembr) exists solely to enable PyPI Trusted Publishing and provenance attestation.
+> **Canonical home:** [codeberg.org/bugrasan/mdformat-sembr](https://codeberg.org/bugrasan/mdformat-sembr) — issues and contributions tracked there.
+> The [GitHub mirror](https://github.com/bugrasan/mdformat-sembr) exists solely to enable PyPI Trusted Publishing and provenance attestation.
 
 > **⚠️ Disclaimer**: This project was built using **vibe-/agentic-coding**
 
