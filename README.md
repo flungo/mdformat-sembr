@@ -67,20 +67,76 @@ are separate node types and are never touched.
 `is_md_equal` validator gates correctness. If validation ever fails, the break logic is
 wrong — it is never worked around with `--no-validate` or hard breaks.
 
+The `preserve_indented_breaks` option (see Configuration) puts two more hooks to work,
+and without it neither does anything. markdown-it discards a continuation line's
+indentation while tokenizing, so the `newline` and `escape` inline rules are wrapped to
+record it as token metadata, and a postprocessor on the `softbreak`/`hardbreak` node
+types passes it on as an internal marker line, which the paragraph postprocessor folds
+away. Neither reaches the HTML renderer, so validation is unaffected. All of this lives
+in `POSTPROCESSORS` rather than `RENDERERS` so that it chains with other plugins
+instead of conflicting with them.
+
 ## Configuration
 
 Configure via `[plugin.sembr]` in `.mdformat.toml`, or via CLI flags. CLI values merge
 over TOML.
 
-| Option          | Type        | Default   | Meaning                                                        |
-| --------------- | ----------- | --------- | -------------------------------------------------------------- |
-| `min_chars`     | int         | `15`      | Minimum length of the segment before a break is allowed.       |
-| `abbreviations` | list[str]   | see below | Tokens after which no sentence break is inserted.              |
-| `break_clauses` | bool        | `false`   | Enable clause-level breaks (SemBr "SHOULD"). Off by default.   |
-| `clause_chars`  | str         | `",;:—"`  | Clause punctuation set (only used when `break_clauses` true).  |
+| Option                     | Type      | Default   | Meaning                                                              |
+| -------------------------- | --------- | --------- | -------------------------------------------------------------------- |
+| `min_chars`                | int       | `15`      | Minimum length of the segment before a break is allowed.             |
+| `abbreviations`            | list[str] | see below | Tokens after which no sentence break is inserted.                    |
+| `break_clauses`            | bool      | `false`   | Enable clause-level breaks (SemBr "SHOULD"). Off by default.         |
+| `clause_chars`             | str       | `",;:—"`  | Clause punctuation set (only used when `break_clauses` true).        |
+| `closing_punct`            | bool      | `false`   | Keep a closing quote or bracket after a terminator on the same line. |
+| `continuation_indent`      | int       | `0`       | Indent continuation lines by N spaces (`2` when preserving breaks).  |
+| `preserve_indented_breaks` | bool      | `false`   | Treat an indented line in the source as a break to keep.             |
 
 CLI flags: `--sembr-min-chars`, `--sembr-abbreviations`, `--sembr-break-clauses`,
-`--sembr-clause-chars`.
+`--sembr-clause-chars`, `--sembr-closing-punct`, `--sembr-continuation-indent`,
+`--sembr-preserve-indented-breaks`.
+
+### Continuation indent
+
+A clause break follows from its punctuation, so the plugin re-derives it on every run.
+The breaks SemBr's *MAY* rules describe (6, 8, 10 and 11) follow from nothing: they
+exist only because an author chose them. Indentation serves both, in two halves that
+are opted into separately.
+
+`continuation_indent` **writes** it — a line continuing the one above is indented,
+after a clause break and a hard break alike — so with `break_clauses` on:
+
+```markdown
+They are endowed with reason and conscience,
+  and should act towards one another in a spirit of brotherhood.
+```
+
+Delete that comma and the break goes with it, because nothing justifies it any more.
+
+`preserve_indented_breaks` **reads** it — an indented line is a break to keep, as is
+the line that returns to the margin straight after one, so the same paragraph survives
+without the comma:
+
+```markdown
+They are endowed with reason and conscience
+  and should act towards one another in a spirit of brotherhood.
+```
+
+That is the only way to keep a *MAY* break, since no punctuation implies one. The
+indentation written is the plugin's own, however a line arrived: a kept line that starts
+a sentence SemBr would break before goes back to the margin, and one that does not is
+indented, the line that returned to the margin included.
+
+A few breaks cannot be kept, and reflow as they would without preservation: one inside a
+link or a code span, which the plugin never breaks within, and one before a line
+starting with `~`, `:` or `%`, markers some plugins escape only in the first column. And
+with `break_clauses` on as well, a clause break once indented reads back as kept, so
+deleting its punctuation no longer removes it: for breaks that go with their
+punctuation, use `continuation_indent` alone.
+
+Preserving has nowhere to record a kept break but the indent below it, so it raises
+`continuation_indent` to `2` unless you set it yourself — and setting that width to
+`0` turns preservation off along with the indenting, with a warning, rather than
+writing a document the next run would undo.
 
 `.mdformat.toml` example:
 
@@ -88,6 +144,7 @@ CLI flags: `--sembr-min-chars`, `--sembr-abbreviations`, `--sembr-break-clauses`
 [plugin.sembr]
 min_chars = 20
 break_clauses = true
+preserve_indented_breaks = true
 ```
 
 ## License
