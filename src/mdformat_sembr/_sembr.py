@@ -317,6 +317,7 @@ def insert_breaks(
     A hard break already in the paragraph (``\\`` before a newline) renders to
     ``<br>``, so it is kept exactly where it is: the text on either side of it
     is broken independently and the hard break itself is never collapsed.
+    Whitespace touching a hard break is kept verbatim too (see below).
     """
     abbrev = (
         DEFAULT_ABBREVIATIONS
@@ -324,8 +325,25 @@ def insert_breaks(
         else frozenset(abbreviations)
     )
 
-    return _HARD_BREAK.join(
-        _insert_breaks_between_hard_breaks(
+    segments = _split_on_hard_breaks(text)
+    last = len(segments) - 1
+    out: list[str] = []
+    for i, segment in enumerate(segments):
+        # Whitespace touching a hard break is part of what the paragraph
+        # renders to, so it is set aside before the run is collapsed and put
+        # back afterwards: a space before the backslash renders as "x <br>"
+        # (mdformat's validator rejects "x<br>" as different HTML), a
+        # non-breaking space is content, and mdformat indents a line that
+        # starts with HTML after a hard break so that it cannot open an HTML
+        # block. Only the whitespace inside a run is collapsed and re-broken.
+        lead = trail = ""
+        if i > 0:
+            body = segment.lstrip()
+            lead, segment = segment[: len(segment) - len(body)], body
+        if i < last:
+            body = segment.rstrip()
+            trail, segment = segment[len(body) :], body
+        broken = _insert_breaks_between_hard_breaks(
             segment,
             min_chars=min_chars,
             abbreviations=abbrev,
@@ -333,8 +351,8 @@ def insert_breaks(
             clause_chars=clause_chars,
             closing_punct=closing_punct,
         )
-        for segment in _split_on_hard_breaks(text)
-    )
+        out.append(lead + broken + trail)
+    return _HARD_BREAK.join(out)
 
 
 def _insert_breaks_between_hard_breaks(

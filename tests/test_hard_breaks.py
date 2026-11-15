@@ -144,3 +144,47 @@ def test_long_backslash_run_without_newline_stays_fast() -> None:
     started = time.perf_counter()
     assert insert_breaks(src, min_chars=1) == src
     assert time.perf_counter() - started < 1.0
+
+
+# ---------------------------------------------------------------------------
+# Whitespace touching a hard break
+#
+# It is part of what the paragraph renders to: mdformat's validator treats
+# "alpha <br>" and "alpha<br>" as different HTML and refuses the file, a
+# non-breaking space is content, and mdformat indents a line that starts with
+# HTML after a hard break so that it cannot open an HTML block. None of these
+# paragraphs has a sentence boundary, so the plugin must not change them.
+# ---------------------------------------------------------------------------
+
+WHITESPACE_AT_HARD_BREAKS = pytest.mark.parametrize(
+    "src",
+    [
+        "alpha \\\nbeta\n",
+        "alpha   \\\nbeta\n",
+        "alpha\t\\\nbeta\n",
+        "alpha&nbsp;\\\nbeta\n",
+        "First line here\n\\\nNext line here\n",
+        "alpha\\\n    <div>bar</div>\n",
+    ],
+    ids=["space", "three-spaces", "tab", "nbsp", "backslash-alone", "indented-html"],
+)
+
+
+@WHITESPACE_AT_HARD_BREAKS
+def test_whitespace_touching_a_hard_break_is_kept(src: str) -> None:
+    out = mdformat.text(src, extensions={"sembr"})
+    assert out == mdformat.text(src)
+    assert is_md_equal(src, out, extensions={"sembr"})
+
+
+@WHITESPACE_AT_HARD_BREAKS
+def test_whitespace_touching_a_hard_break_is_idempotent(src: str) -> None:
+    once = mdformat.text(src, extensions={"sembr"})
+    assert mdformat.text(once, extensions={"sembr"}) == once
+
+
+def test_sentences_still_break_next_to_kept_whitespace() -> None:
+    src = "First one. Second one. \\\nThird one. Fourth one."
+    assert insert_breaks(src, min_chars=1) == (
+        "First one.\nSecond one. \\\nThird one.\nFourth one."
+    )
