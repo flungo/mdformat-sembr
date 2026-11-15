@@ -68,12 +68,24 @@ _OPENERS = "\"'([`*_\u201c\u2018\u00ab"
 # (The two-trailing-spaces form has already been normalised to this by the
 # time a paragraph postprocessor runs.)
 #
-# Backslashes before a newline pair up into literal backslashes, so the run
-# has to be counted rather than merely inspected: an odd run ends in a hard
-# break, an even one is a literal backslash followed by a soft break. A
-# lookbehind cannot express that, because in ``\\\\\\`` the backslash before
-# the last one is itself half of an escaped pair.
-_BACKSLASH_RUN_RE = re.compile(r"\\+\n")
+# Backslashes before a newline pair up into literal backslashes, so the whole
+# run has to be counted rather than only its last character inspected: an odd
+# run ends in a hard break, an even one is literal backslashes followed by a
+# soft break. (In a run of three, the backslash before the last one is itself
+# half of an escaped pair.) The counting happens in _split_on_hard_breaks.
+#
+# Why ``(?<!\\)\\+\n`` rather than the simpler-looking ``\\+\n``: both find
+# exactly the same runs, but Python's ``re`` backtracks. On n backslashes that
+# are NOT followed by a newline, ``\\+\n`` is retried from every position inside
+# the run, and each attempt backtracks through every shorter run before it
+# fails: about n*n/2 steps (40 000 backslashes take ~1 s, a crafted 1 MB file
+# several minutes). The negative lookbehind lets a match start only at the
+# first backslash of a run, so each run is scanned once: linear time. No match
+# is lost, because a match of ``\\+\n`` always starts at the beginning of a run
+# anyway: if any tail of the run reaches the newline, the whole run does.
+# (The possessive ``\\++\n`` would read better, but it needs Python 3.11 and
+# this package supports 3.10.)
+_BACKSLASH_RUN_RE = re.compile(r"(?<!\\)\\+\n")
 _HARD_BREAK = "\\\n"
 
 # Placeholder markers use NUL bytes which never occur in Markdown source text.

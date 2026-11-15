@@ -10,6 +10,8 @@ to format the whole file.
 
 from __future__ import annotations
 
+import time
+
 import mdformat
 import pytest
 from markdown_it import MarkdownIt
@@ -129,3 +131,16 @@ def test_any_run_length_is_ast_safe(run: int) -> None:
 def test_any_run_length_is_idempotent(run: int) -> None:
     once = mdformat.text(_paragraph_with_run(run), extensions={"sembr"})
     assert mdformat.text(once, extensions={"sembr"}) == once
+
+
+def test_long_backslash_run_without_newline_stays_fast() -> None:
+    """A backslash run that never reaches a newline must not backtrack.
+
+    The earlier pattern took quadratic time here: about 6 s for 100 000
+    backslashes. The current one finishes in milliseconds, so the bound below
+    leaves a wide margin for slow machines.
+    """
+    src = "Start of the text. " + "\\" * 100_000 + " end."
+    started = time.perf_counter()
+    assert insert_breaks(src, min_chars=1) == src
+    assert time.perf_counter() - started < 1.0
