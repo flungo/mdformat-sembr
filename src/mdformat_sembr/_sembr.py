@@ -36,6 +36,7 @@ DEFAULT_CLAUSE_CHARS = ",;:\u2014"  # comma, semicolon, colon, em dash
 DEFAULT_ABBREVIATIONS: frozenset[str] = frozenset(
     {
         "e.g", "i.e", "etc", "vs", "cf", "viz", "al", "approx", "incl", "excl",
+        "eg", "ie",  # undotted e.g./i.e., common in technical prose
         "Mr", "Mrs", "Ms", "Dr", "Prof", "Sr", "Jr", "St",
         "Inc", "Ltd", "Co", "Corp", "U.S", "U.K", "U.N", "E.U",
         "Fig", "fig", "no", "No", "vol", "Vol", "ch", "Ch",

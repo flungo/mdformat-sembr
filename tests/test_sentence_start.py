@@ -82,6 +82,18 @@ def test_digit_still_starts_a_sentence() -> None:
     assert _br("First one. 42 follows.") == "First one.\n42 follows."
 
 
+# --- undotted abbreviations --------------------------------------------------
+# A code span counts as a sentence start, so the undotted "eg." and "ie." (for
+# e.g. and i.e.) must be known abbreviations, or the line breaks after them.
+
+def test_undotted_eg_before_a_code_span_does_not_break() -> None:
+    assert "\n" not in _br("Use a single word, eg. `Number`, and keep it short.")
+
+
+def test_undotted_ie_before_a_capital_does_not_break() -> None:
+    assert "\n" not in _br("Pick the short form, ie. Number, and keep it short.")
+
+
 # --- through mdformat --------------------------------------------------------
 
 def test_through_mdformat_with_default_threshold() -> None:
